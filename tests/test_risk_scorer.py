@@ -118,6 +118,19 @@ class TestTargetScoring:
     def test_empty_target(self, scorer):
         assert scorer.score_target("")["score"] == 0
 
+    def test_reports_matched_keyword_even_at_zero(self, scorer):
+        r = scorer.score_target("dev-environment")
+        assert r["score"] == 0
+        assert r["matched_keyword"] == "dev"
+
+    def test_no_match_reports_none(self, scorer):
+        assert scorer.score_target("cost-explorer")["matched_keyword"] == "none"
+
+    def test_highest_scoring_keyword_wins_on_multiple_matches(self, scorer):
+        r = scorer.score_target("dev-prod-mirror")  # 'dev' (0) and 'prod' (2)
+        assert r["score"] == 2
+        assert r["matched_keyword"] == "prod"
+
 
 # ── Full Classification Tests ─────────────────────────────────────────────────
 class TestClassify:
@@ -145,6 +158,17 @@ class TestClassify:
         result = scorer.classify(action)
         assert result["blast_radius"] == 2
         assert result["gate_required"] is True
+
+    def test_dominant_factors_lists_all_ties(self, scorer):
+        r = scorer.classify(make_action("delete_table", "prod-database"))
+        assert r["blast_radius"] == 2
+        assert set(r["dominant_factors"]) == {"prefix", "target"}
+        assert r["dominant_factor"] in r["dominant_factors"]
+
+    def test_read_only_has_no_dominant_factor(self, scorer):
+        r = scorer.classify(make_action("get_data", "dev-env"))
+        assert r["dominant_factors"] == []
+        assert r["dominant_factor"] == "none"
 
     def test_result_has_full_audit_trail(self, scorer):
         action = make_action("delete_table", "staging-db")

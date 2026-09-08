@@ -16,6 +16,8 @@ import pipeline_direct
 from modules.hallucination_guard import evaluate as guard_evaluate
 from modules.audit_logger import AuditLogger
 
+CLAUDE_MODEL = "claude-sonnet-5"
+
 
 SYSTEM_PROMPT = """You are a security analyst reviewing agentic AI action risk assessments.
 
@@ -93,12 +95,19 @@ def run(actions_input: list[dict], api_key: str) -> dict:
     client = anthropic.Anthropic(api_key=api_key)
     try:
         message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1000,
+            model=CLAUDE_MODEL,
+            max_tokens=2048,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}]
         )
-        claude_text = message.content[0].text
+        # Join every text block — with adaptive thinking on, content[0] may be a
+        # (possibly empty) thinking block rather than the answer.
+        claude_text = "".join(
+            block.text for block in message.content
+            if getattr(block, "type", None) == "text"
+        ).strip()
+        if not claude_text:
+            raise ValueError(f"Claude returned no text (stop_reason={message.stop_reason})")
         claude_success = True
         claude_error = None
     except Exception as e:
@@ -133,7 +142,7 @@ def run(actions_input: list[dict], api_key: str) -> dict:
         "claude": {
             "success":        claude_success,
             "error":          claude_error,
-            "model":          "claude-sonnet-4-6",
+            "model":          CLAUDE_MODEL,
             "text":           claude_text,
             "prompt_sent":    prompt
         },

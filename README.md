@@ -92,12 +92,21 @@ Action -> RiskScorer -> ApprovalGate -> AuditLogger
 ```
 
 **Pipeline 2 — Claude-augmented.** Runs the direct pipeline first, then passes the
-**pre-computed** scores to Claude for a plain-English briefing (action-by-action
-analysis, Kiro-pattern match, mitigation recommendations). Claude **never computes or
-recomputes a score** — and every number in its response is checked by the
-`HallucinationGuard`, which extracts each numeric claim via regex and verifies it
-against the source pipeline JSON (`VERIFIED` within 5%, `APPROXIMATION` within 15%,
+**pre-computed** scores to Claude (`claude-sonnet-5`) for a plain-English briefing
+(action-by-action analysis, Kiro-pattern match, mitigation recommendations). Claude
+**never computes or recomputes a score** — and every number in its response is checked
+by the `HallucinationGuard`, which extracts each numeric claim via regex and verifies
+it against the source pipeline JSON (`VERIFIED` within 5%, `APPROXIMATION` within 15%,
 otherwise `UNVERIFIED`).
+
+### Surfaces
+
+| Surface | Entry point | Use |
+|---|---|---|
+| Dashboard | `streamlit run app.py` | Interactive exploration, full calculation trace |
+| REST API | `uvicorn api:app` | Programmatic pre-execution gate for an agent runtime |
+| CLI | `python pipeline_direct.py` | Score `data/sample_actions.json`, print JSON |
+| Library | `from modules.risk_scorer import RiskScorer` | Embed directly |
 
 ---
 
@@ -105,18 +114,20 @@ otherwise `UNVERIFIED`).
 
 ```
 app.py                        Streamlit dashboard (entry point)
+api.py                        FastAPI microservice — HTTP wrapper over the direct pipeline
 pipeline_direct.py            Pipeline 1 — deterministic, no LLM
 pipeline_claude.py            Pipeline 2 — Claude-augmented interpretation
 modules/
   risk_scorer.py              Blast-radius classifier (Action, PrefixTrie, RiskScorer)
-  approval_gate.py            Human-in-loop state machine (PENDING -> APPROVED/BLOCKED)
+  approval_gate.py            Human-in-loop state machine + heapq priority queue
   audit_logger.py             Structured audit trail (singleton, DynamoDB-compatible JSON)
   hallucination_guard.py      Verifies Claude's numerical claims against source data
 data/
   sample_actions.json         Demo action sequence (includes the exact Kiro action)
-tests/                        pytest unit tests (99% module coverage)
+tests/                        pytest unit tests (~99% module coverage, 64 tests)
 Dockerfile                    Container definition
-.github/workflows/ci.yml      CI: tests + coverage gate + Docker build
+docker-compose.yml            Local orchestration (dashboard + api)
+.github/workflows/ci.yml      CI: tests + coverage gate + API smoke test + Docker build
 CONTEXT.md                    Data sources, incident timeline, scoring tables
 ```
 
@@ -125,10 +136,14 @@ CONTEXT.md                    Data sources, incident timeline, scoring tables
 - **`Action`** — frozen dataclass: immutable, hashable, safe to pass across threads
 - **`PrefixTrie`** — O(k) prefix matching on the action name (k = prefix length,
   effectively O(1) relative to the ruleset)
-- **`RiskScorer`** — strategy-style classifier over three independent factor tables
-- **`ApprovalGate`** — explicit state machine; "innocent until proven dangerous"
-  (default allow, block only at tier ≥ 2)
-- **`AuditLogger`** — singleton, one log per session, exportable as JSON
+- **`RiskScorer`** — strategy-style classifier over three independent factor tables;
+  `dominant_factors` reports every factor tied at the winning score
+- **`ApprovalGate`** — explicit state machine ("innocent until proven dangerous":
+  default allow, block only at tier ≥ 2). Gated decisions land on a `heapq`
+  priority queue — `next_pending()` serves the highest blast radius first, ties
+  by arrival order
+- **`AuditLogger`** — singleton, one `OrderedDict` log per session (keyed by
+  insertion sequence), exportable as JSON
 
 ---
 
@@ -143,6 +158,29 @@ streamlit run app.py
 
 Open http://localhost:8501. The Claude-augmented pipeline needs an Anthropic API key,
 entered in the dashboard sidebar (never persisted).
+
+### REST API
+
+```bash
+uvicorn api:app --port 8000
+```
+
+```bash
+# Score one action before an agent executes it
+curl -X POST http://localhost:8000/score \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"recreate_environment","target":"prod-cost-explorer-china",
+       "agent_id":"kiro-01","parameters":{"force":true,"all":true}}'
+# -> {"allowed": false, "gate": {"status": "BLOCKED", "approvers_needed": 2}, ...}
+```
+
+| Method | Path | Body | Returns |
+|---|---|---|---|
+| `GET` | `/health` | — | liveness |
+| `POST` | `/score` | one action | classification + gate decision + `allowed` |
+| `POST` | `/score/batch` | list of actions | full pipeline output + audit summary |
+
+Interactive docs at `http://localhost:8000/docs`.
 
 ### Direct pipeline from the CLI
 
@@ -170,6 +208,12 @@ if not decision.to_dict()["passed"]:
 ### Docker
 
 ```bash
+docker compose up --build      # dashboard on :8501, API on :8000
+```
+
+or a single service:
+
+```bash
 docker build -t agentguard .
 docker run -p 8501:8501 agentguard
 ```
@@ -182,9 +226,9 @@ docker run -p 8501:8501 agentguard
 pytest tests/ -v --cov=modules --cov-report=term-missing
 ```
 
-CI runs the suite on every push to `main`/`develop` with an 80% coverage gate,
-verifies the Kiro action still classifies as `CATASTROPHIC`, and builds the
-Docker image.
+64 tests, ~99% module coverage. CI runs the suite on every push to `main`/`develop`
+with an 80% coverage gate, verifies the Kiro action still classifies as
+`CATASTROPHIC`, smoke-tests the REST API, and builds the Docker image.
 
 ## License
 

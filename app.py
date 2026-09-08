@@ -366,7 +366,7 @@ for r in results:
             </div>
         </td>
         <td>{status_html}</td>
-        <td style="font-size:.72rem;color:#555">{c['dominant_factor']}</td>
+        <td style="font-size:.72rem;color:#555">{' + '.join(c.get('dominant_factors') or [c['dominant_factor']])}</td>
     </tr>"""
 
 st.markdown(f"""
@@ -415,7 +415,8 @@ if claude_data and claude_data.get("claude", {}).get("success"):
     cl = claude_data["claude"]
     guard = claude_data.get("hallucination_guard", {})
 
-    st.markdown('<div class="section-header">CLAUDE INTERPRETATION — claude-sonnet-4-6</div><div class="section-body">', unsafe_allow_html=True)
+    model_id = cl.get("model", "claude")
+    st.markdown(f'<div class="section-header">CLAUDE INTERPRETATION — {model_id}</div><div class="section-body">', unsafe_allow_html=True)
 
     st.markdown(f'<div class="claude-box">{cl["text"]}</div>', unsafe_allow_html=True)
 

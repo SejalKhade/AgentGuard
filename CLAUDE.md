@@ -25,6 +25,12 @@ Two pipelines:
 - Claude INTERPRETS the risk score and explains it in plain English
 - Claude NEVER recalculates scores — it only receives pre-computed values
 - HallucinationGuard verifies every numerical claim Claude makes
+- Model: claude-sonnet-5 (see CLAUDE_MODEL in pipeline_claude.py)
+
+### Surfaces
+- app.py — Streamlit dashboard for interactive exploration
+- api.py — FastAPI service: POST /score (single action), POST /score/batch
+  (full pipeline), GET /health. Run with `uvicorn api:app`.
 
 ## What This Project Does NOT Do
 
@@ -36,20 +42,24 @@ Two pipelines:
 ## File Structure
 
 - app.py                     Streamlit dashboard (entry point)
+- api.py                     FastAPI microservice — HTTP wrapper over the direct pipeline
 - pipeline_direct.py         Pipeline 1 — deterministic, no LLM
 - pipeline_claude.py         Pipeline 2 — Claude-augmented interpretation
 - modules/
   - risk_scorer.py           Core blast radius classifier (OOP, data structures)
-  - approval_gate.py         Human-in-loop enforcement logic
+  - approval_gate.py         Human-in-loop enforcement logic + priority queue
   - audit_logger.py          Structured audit trail (DynamoDB-compatible JSON)
   - hallucination_guard.py   Verifies Claude's numerical claims against source
 - data/
   - sample_actions.json      Test action sequences
-- tests/
-  - test_risk_scorer.py      pytest unit tests (90%+ coverage target)
-  - test_approval_gate.py    pytest tests for gate logic
+- tests/                     pytest unit tests (~99% module coverage)
+  - test_risk_scorer.py      Trie, scoring tables, full classification
+  - test_approval_gate.py    Gate state machine + priority queue ordering
+  - test_audit_logger.py     Singleton logger, ordered dict, summary aggregation
+  - test_hallucination_guard.py  Numeric claim extraction and verification
+  - test_api.py              FastAPI endpoints (TestClient)
 - Dockerfile                 Container definition
-- docker-compose.yml         Local orchestration
+- docker-compose.yml         Local orchestration (dashboard + api)
 - .github/workflows/ci.yml   GitHub Actions CI/CD
 - requirements.txt
 - CLAUDE.md                  This file
@@ -65,9 +75,11 @@ Two pipelines:
 
 ## Data Structures Used
 
-- Trie for O(1) action prefix matching (read_ / delete_ / recreate_)
-- Priority queue for pending approval requests (highest blast radius first)
-- Ordered dict for audit log (insertion order preserved)
+- Trie (PrefixTrie) for O(k) action prefix matching (get_ / delete_ / recreate_)
+- Priority queue (heapq) in ApprovalGate — pending/blocked decisions served
+  highest blast radius first, ties by arrival order (ApprovalGate.next_pending)
+- Ordered dict (collections.OrderedDict) for the audit log, keyed by insertion
+  sequence so replay order is preserved
 - Frozen dataclass for immutable Action records
 
 ## Algorithm Complexity

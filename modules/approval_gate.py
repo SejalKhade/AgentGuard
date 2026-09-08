@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 import datetime
+import heapq
 
 
 class GateStatus(Enum):
@@ -70,11 +71,35 @@ class ApprovalGate:
         In production, this would call a webhook/notification system.
         """
         self.simulate_approval = simulate_approval
-        self._pending_queue: list = []  # Priority queue by blast_radius
+        # Binary-heap priority queue of decisions awaiting human review.
+        # Entries are (-blast_radius, insertion_seq, GateDecision) so the
+        # highest blast radius is served first and ties break by arrival order.
+        # The unique seq guarantees tuple comparison never touches GateDecision.
+        self._pending_queue: list = []
+        self._seq: int = 0
+
+    def _enqueue(self, decision: GateDecision) -> None:
+        heapq.heappush(
+            self._pending_queue,
+            (-decision.blast_radius, self._seq, decision),
+        )
+        self._seq += 1
+
+    @property
+    def pending_count(self) -> int:
+        """Number of decisions currently awaiting human review."""
+        return len(self._pending_queue)
+
+    def next_pending(self) -> Optional[GateDecision]:
+        """Pop the highest-blast-radius decision awaiting review (None if empty)."""
+        if not self._pending_queue:
+            return None
+        return heapq.heappop(self._pending_queue)[2]
 
     def evaluate(self, classification: dict) -> GateDecision:
         """
         Evaluate a risk classification and return a gate decision.
+        Gated decisions (blast >= 2) are also pushed onto the priority queue.
         """
         blast    = classification["blast_radius"]
         score    = classification["risk_score"]
@@ -110,14 +135,16 @@ class ApprovalGate:
             else:
                 status = GateStatus.BLOCKED
                 reason = "DESTRUCTIVE action blocked. Awaiting human approval."
-            return GateDecision(
+            decision = GateDecision(
                 action_name=action, blast_radius=blast, risk_score=score,
                 status=status, reason=reason,
                 approvers_needed=needed, approvers_got=0
             )
+            self._enqueue(decision)
+            return decision
 
         # blast == 3: CATASTROPHIC
-        return GateDecision(
+        decision = GateDecision(
             action_name=action, blast_radius=blast, risk_score=score,
             status=GateStatus.BLOCKED,
             reason=(
@@ -128,6 +155,8 @@ class ApprovalGate:
             ),
             approvers_needed=needed, approvers_got=0
         )
+        self._enqueue(decision)
+        return decision
 
     def approve(self, decision: GateDecision, approver: str = "demo_user") -> GateDecision:
         """Simulate human approval of a pending decision."""

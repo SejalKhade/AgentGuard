@@ -175,13 +175,13 @@ class RiskScorer:
     def score_target(self, target: str) -> dict:
         """Score based on target environment."""
         t = target.lower()
-        score = 0
-        matched_keyword = "none"
-        for keyword, val in self.TARGET_SCORES.items():
-            if keyword in t:
-                if val > score:
-                    score = val
-                    matched_keyword = keyword
+        matches = [(kw, val) for kw, val in self.TARGET_SCORES.items() if kw in t]
+        if matches:
+            # Highest-scoring keyword wins; on a tie, the first in table order
+            # (max() keeps the earliest element on equal keys).
+            matched_keyword, score = max(matches, key=lambda kv: kv[1])
+        else:
+            matched_keyword, score = "none", 0
         return {
             "input": target,
             "score": score,
@@ -239,12 +239,18 @@ class RiskScorer:
         blast = BlastRadius(blast_value)
         risk_score = round((blast_value / 3) * 100, 1)
 
-        dominant = max(
-            [("prefix",  prefix_result["score"]),
-             ("target",  target_result["score"]),
-             ("scope",   scope_result["score"])],
-            key=lambda x: x[1]
-        )[0]
+        factor_scores = {
+            "prefix": prefix_result["score"],
+            "target": target_result["score"],
+            "scope":  scope_result["score"],
+        }
+        # Every factor tied at the winning score co-drives the classification.
+        # Tier 0 has no driver — nothing pushed the action above read-only.
+        dominant_factors = (
+            [f for f, s in factor_scores.items() if s == blast_value]
+            if blast_value > 0 else []
+        )
+        dominant = dominant_factors[0] if dominant_factors else "none"
 
         return {
             "action":          action.to_dict(),
@@ -254,6 +260,7 @@ class RiskScorer:
             "gate_required":   blast.gate_required(),
             "approvers_needed": blast.approvers_required(),
             "dominant_factor": dominant,
+            "dominant_factors": dominant_factors,
             "formula":         "blast = max(prefix, target, scope); score = (blast/3)*100",
             "calculation": {
                 "prefix":  prefix_result,

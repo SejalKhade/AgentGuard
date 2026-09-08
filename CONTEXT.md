@@ -41,7 +41,7 @@ blast_radius = max(
 
 risk_score (0-100) = (blast_radius / 3) * 100
 
-gate_required = risk_score >= 50
+gate_required = blast_radius >= 2      # DESTRUCTIVE or CATASTROPHIC (risk_score >= 66.7)
 ```
 
 ### Prefix Scoring Table (Source: AWS IAM action taxonomy)
@@ -51,19 +51,22 @@ gate_required = risk_score >= 50
 | get_, list_, describe_, fetch_ | 0 | get_records, list_users |
 | update_, modify_, patch_, put_ | 1 | update_config, modify_policy |
 | create_, add_, insert_ | 1 | create_bucket, add_user |
-| delete_, remove_, drop_ | 2 | delete_table, remove_user |
-| terminate_, destroy_, wipe_ | 2 | terminate_instance |
-| recreate_, reset_, rebuild_ | 3 | recreate_environment |
+| delete_, remove_, drop_, detach_, revoke_ | 2 | delete_table, remove_user |
+| terminate_, destroy_, wipe_, unlink_ | 2 | terminate_instance |
+| recreate_, rebuild_, reset_prod, restore_from | 3 | recreate_environment |
 | delete_all, wipe_all, truncate_ | 3 | delete_all_records |
 
 ### Target Environment Scoring
 
 | Target contains | Score |
 |-----------------|-------|
-| dev, test, local, staging, sandbox | 0 |
-| uat, qa, preprod | 1 |
-| prod, production, live, prd | 2 |
-| all-regions, global, multi-region | +1 bonus |
+| dev, test, local, sandbox, mock | 0 |
+| staging, uat, qa, preprod, pre-prod | 1 |
+| prod, production, live, prd, release | 2 |
+| global, multi, all-region | 3 |
+
+The highest-scoring keyword found in the target wins; the matched keyword is
+recorded even when its score is 0 (so `dev-environment` reports `dev`, not `none`).
 
 ## Hallucination Guard Methodology
 

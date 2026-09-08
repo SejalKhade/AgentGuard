@@ -41,6 +41,18 @@ jobs:
           print('PASS: Kiro incident action correctly classified as CATASTROPHIC')
           "
 
+      - name: Smoke-test the REST API
+        run: |
+          uvicorn api:app --host 127.0.0.1 --port 8000 &
+          for i in $(seq 1 20); do
+            curl -sf http://127.0.0.1:8000/health && break || sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health
+          curl -sf -X POST http://127.0.0.1:8000/score \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"recreate_environment","target":"prod","agent_id":"ci","parameters":{"all":true}}' \
+            | python -c "import sys,json; b=json.load(sys.stdin); assert b['allowed'] is False and b['classification']['blast_radius']==3; print('PASS: API blocks the Kiro action')"
+
   docker:
     runs-on: ubuntu-latest
     needs: test

@@ -6,7 +6,8 @@ Every action, every gate decision, every Claude output is logged.
 """
 
 from __future__ import annotations
-from typing import ClassVar
+from collections import OrderedDict
+from typing import ClassVar, Optional
 import datetime
 import json
 
@@ -14,16 +15,19 @@ import json
 class AuditLogger:
     """
     Singleton audit logger.
-    Stores entries in memory (ordered dict) + exportable as JSON.
-    Schema matches AWS DynamoDB item format for production compatibility.
+    Stores entries in memory (ordered dict keyed by insertion sequence) +
+    exportable as JSON. Schema matches AWS DynamoDB item format for production
+    compatibility.
     """
-    _instance: ClassVar[Optional[AuditLogger]] = None
-    _log: list
+    _instance: ClassVar[Optional["AuditLogger"]] = None
+    _log: "OrderedDict[int, dict]"
+    _seq: int
 
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance._log = []
+            cls._instance._log = OrderedDict()
+            cls._instance._seq = 0
         return cls._instance
 
     @classmethod
@@ -59,20 +63,22 @@ class AuditLogger:
             "logged_at":       datetime.datetime.now().isoformat(),
             "ttl":             int(datetime.datetime.now().timestamp()) + 86400 * 30
         }
-        self._log.append(entry)
+        self._log[self._seq] = entry
+        self._seq += 1
         return entry
 
     def get_all(self) -> list:
-        return self._log.copy()
+        return list(self._log.values())
 
     def get_summary(self) -> dict:
         if not self._log:
             return {"total": 0}
-        total = len(self._log)
-        blocked = sum(1 for e in self._log if not e["gate_passed"])
-        catastrophic = sum(1 for e in self._log if e["blast_radius"] == 3)
-        destructive  = sum(1 for e in self._log if e["blast_radius"] == 2)
-        auto_passed  = sum(1 for e in self._log if e["blast_radius"] <= 1)
+        entries = list(self._log.values())
+        total = len(entries)
+        blocked = sum(1 for e in entries if not e["gate_passed"])
+        catastrophic = sum(1 for e in entries if e["blast_radius"] == 3)
+        destructive  = sum(1 for e in entries if e["blast_radius"] == 2)
+        auto_passed  = sum(1 for e in entries if e["blast_radius"] <= 1)
         return {
             "total_actions":       total,
             "auto_passed":         auto_passed,
@@ -80,8 +86,8 @@ class AuditLogger:
             "catastrophic_count":  catastrophic,
             "destructive_count":   destructive,
             "block_rate_pct":      round(blocked / total * 100, 1) if total else 0,
-            "pipelines_used":      list({e["pipeline"] for e in self._log})
+            "pipelines_used":      list({e["pipeline"] for e in entries})
         }
 
     def export_json(self) -> str:
-        return json.dumps(self._log, indent=2, default=str)
+        return json.dumps(list(self._log.values()), indent=2, default=str)

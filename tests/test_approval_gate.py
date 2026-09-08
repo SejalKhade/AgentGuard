@@ -57,3 +57,38 @@ class TestApprovalGate:
         approved = gate.approve(d, "senior-engineer")
         assert approved.status == GateStatus.APPROVED
         assert approved.approvers_got == 1
+
+    def test_non_simulated_destructive_is_blocked(self, scorer):
+        g = ApprovalGate(simulate_approval=False)
+        d = g.evaluate(classify(scorer, "delete_table", "prod-db"))
+        assert d.status == GateStatus.BLOCKED
+        assert g.pending_count == 1
+
+
+class TestPriorityQueue:
+    def test_only_gated_actions_are_queued(self, gate, scorer):
+        gate.evaluate(classify(scorer, "get_data", "dev"))        # blast 0
+        gate.evaluate(classify(scorer, "update_config", "dev"))   # blast 1
+        assert gate.pending_count == 0
+
+    def test_highest_blast_radius_served_first(self, gate, scorer):
+        gate.evaluate(classify(scorer, "delete_table", "prod-db"))            # blast 2
+        gate.evaluate(classify(scorer, "recreate_environment", "prod",
+                               {"all": True}))                                # blast 3
+        gate.evaluate(classify(scorer, "terminate_instance", "production"))   # blast 2
+        assert gate.pending_count == 3
+
+        first = gate.next_pending()
+        assert first.blast_radius == 3           # catastrophic jumps the queue
+        assert first.action_name == "recreate_environment"
+
+        second = gate.next_pending()
+        third = gate.next_pending()
+        assert second.blast_radius == 2
+        assert third.blast_radius == 2
+        # ties broken by arrival order
+        assert (second.action_name, third.action_name) == (
+            "delete_table", "terminate_instance")
+
+    def test_next_pending_empty_returns_none(self, gate):
+        assert gate.next_pending() is None
