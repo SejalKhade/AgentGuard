@@ -1,8 +1,14 @@
 """
-AgentGuard Pipeline 2: Claude-Augmented Pipeline
-Runs direct pipeline first, then sends structured results to Claude
-for plain-English interpretation. Claude NEVER recalculates scores.
-HallucinationGuard verifies all Claude numerical claims.
+AgentGuard — Claude Explanation Layer (optional)
+
+This is NOT a pipeline. The deterministic scorer in pipeline_direct.py is the
+pipeline and always runs. This layer is an optional add-on: given the pipeline's
+output and an Anthropic API key, it asks Claude to explain the pre-computed scores
+in plain English for an engineering manager.
+
+Claude never recalculates a score — it only receives values the Python classifier
+produced. HallucinationGuard then checks every number in Claude's reply against
+the source data.
 """
 
 import json
@@ -12,7 +18,6 @@ import os
 sys.path.insert(0, os.path.dirname(__file__))
 
 import anthropic
-import pipeline_direct
 from modules.hallucination_guard import evaluate as guard_evaluate
 from modules.audit_logger import AuditLogger
 
@@ -53,7 +58,7 @@ DATA LIMITATIONS:
 
 
 def build_prompt(direct_output: dict) -> str:
-    """Build focused prompt from direct pipeline output."""
+    """Build a focused prompt from the pipeline output (structured JSON only)."""
     summary_data = {
         "total_actions": direct_output["total"],
         "audit_summary": direct_output["audit_summary"],
@@ -80,18 +85,18 @@ def build_prompt(direct_output: dict) -> str:
     )
 
 
-def run(actions_input: list[dict], api_key: str) -> dict:
-    """Run Claude-augmented pipeline."""
+def explain(direct_output: dict, api_key: str) -> dict:
+    """
+    Ask Claude to interpret an already-computed pipeline result.
+
+    Returns {"timestamp", "claude": {...}, "hallucination_guard": {...}}.
+    Never raises on an API failure — the error is captured in claude.error and
+    claude.success is False.
+    """
     if not api_key:
-        raise ValueError("Anthropic API key required")
+        raise ValueError("Anthropic API key required for the Claude explanation layer")
 
-    # Step 1: Run direct pipeline
-    direct_output = pipeline_direct.run(actions_input)
-
-    # Step 2: Build prompt from structured data
     prompt = build_prompt(direct_output)
-
-    # Step 3: Call Claude
     client = anthropic.Anthropic(api_key=api_key)
     try:
         message = client.messages.create(
@@ -115,16 +120,13 @@ def run(actions_input: list[dict], api_key: str) -> dict:
         claude_success = False
         claude_error = str(e)
 
-    # Step 4: Hallucination guard
     guard_result = guard_evaluate(claude_text, direct_output)
 
-    # Step 5: Log Claude output
-    logger = AuditLogger()
-    logger.log(
-        action_name="claude_interpretation",
-        pipeline="Claude-Augmented Pipeline",
+    AuditLogger().log(
+        action_name="claude_explanation",
+        pipeline="Claude Explanation Layer",
         classification={
-            "action": {"name": "claude_interpretation", "target": "all", "agent_id": "claude"},
+            "action": {"name": "claude_explanation", "target": "all", "agent_id": "claude"},
             "blast_radius": 0, "blast_label": "Read Only", "risk_score": 0.0,
             "gate_required": False, "approvers_needed": 0,
             "dominant_factor": "none", "formula": "N/A",
@@ -136,9 +138,7 @@ def run(actions_input: list[dict], api_key: str) -> dict:
     )
 
     return {
-        "pipeline":           "Claude-Augmented Pipeline",
         "timestamp":          datetime.datetime.now().isoformat(),
-        "direct_output":      direct_output,
         "claude": {
             "success":        claude_success,
             "error":          claude_error,

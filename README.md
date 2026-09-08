@@ -82,22 +82,25 @@ Action(name="recreate_environment",
 # blast_radius = max(3, 2, 2) = 3  ->  CATASTROPHIC, risk_score 100, 2 approvers, BLOCKED
 ```
 
-### Two pipelines
+### One pipeline, one optional layer
 
-**Pipeline 1 — Direct (no LLM).** Pure Python, fully deterministic: the same input
-always produces the same output. Zero API calls, zero added latency.
+**The pipeline (`pipeline_direct.py`) — always runs.** Pure Python, fully
+deterministic: the same input always produces the same output. Zero API calls,
+zero added latency.
 
 ```
 Action -> RiskScorer -> ApprovalGate -> AuditLogger
 ```
 
-**Pipeline 2 — Claude-augmented.** Runs the direct pipeline first, then passes the
-**pre-computed** scores to Claude (`claude-sonnet-5`) for a plain-English briefing
-(action-by-action analysis, Kiro-pattern match, mitigation recommendations). Claude
-**never computes or recomputes a score** — and every number in its response is checked
-by the `HallucinationGuard`, which extracts each numeric claim via regex and verifies
-it against the source pipeline JSON (`VERIFIED` within 5%, `APPROXIMATION` within 15%,
-otherwise `UNVERIFIED`).
+**Claude explanation layer (`claude_explainer.py`) — optional.** Not a second
+pipeline. Given the pipeline's output and an Anthropic API key, it asks Claude
+(`claude-sonnet-5`) for a plain-English briefing (action-by-action analysis,
+Kiro-pattern match, mitigation recommendations). Claude **never computes or
+recomputes a score** — and every number in its response is checked by the
+`HallucinationGuard`, which extracts each numeric claim via regex and verifies it
+against the source pipeline JSON (`VERIFIED` within 5%, `APPROXIMATION` within 15%,
+otherwise `UNVERIFIED`). Toggled by a checkbox in the dashboard; the REST API stays
+deterministic-only.
 
 ### Surfaces
 
@@ -114,9 +117,9 @@ otherwise `UNVERIFIED`).
 
 ```
 app.py                        Streamlit dashboard (entry point)
-api.py                        FastAPI microservice — HTTP wrapper over the direct pipeline
-pipeline_direct.py            Pipeline 1 — deterministic, no LLM
-pipeline_claude.py            Pipeline 2 — Claude-augmented interpretation
+api.py                        FastAPI microservice — HTTP wrapper over the pipeline
+pipeline_direct.py            The pipeline — deterministic, no LLM
+claude_explainer.py           Optional Claude explanation layer (not a pipeline)
 modules/
   risk_scorer.py              Blast-radius classifier (Action, PrefixTrie, RiskScorer)
   approval_gate.py            Human-in-loop state machine + heapq priority queue
@@ -124,7 +127,7 @@ modules/
   hallucination_guard.py      Verifies Claude's numerical claims against source data
 data/
   sample_actions.json         Demo action sequence (includes the exact Kiro action)
-tests/                        pytest unit tests (~99% module coverage, 64 tests)
+tests/                        pytest unit tests (~99% module coverage, 69 tests)
 Dockerfile                    Container definition
 docker-compose.yml            Local orchestration (dashboard + api)
 .github/workflows/ci.yml      CI: tests + coverage gate + API smoke test + Docker build
@@ -156,8 +159,9 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open http://localhost:8501. The Claude-augmented pipeline needs an Anthropic API key,
-entered in the dashboard sidebar (never persisted).
+Open http://localhost:8501. Tick **"Explain results with Claude"** to layer a
+plain-English briefing on top of the scores — it needs an Anthropic API key,
+entered in the sidebar (never persisted).
 
 ### REST API
 
@@ -182,7 +186,7 @@ curl -X POST http://localhost:8000/score \
 
 Interactive docs at `http://localhost:8000/docs`.
 
-### Direct pipeline from the CLI
+### Pipeline from the CLI
 
 ```bash
 python pipeline_direct.py        # scores data/sample_actions.json, prints the full trace
@@ -226,7 +230,7 @@ docker run -p 8501:8501 agentguard
 pytest tests/ -v --cov=modules --cov-report=term-missing
 ```
 
-64 tests, ~99% module coverage. CI runs the suite on every push to `main`/`develop`
+69 tests, ~99% module coverage. CI runs the suite on every push to `main`/`develop`
 with an 80% coverage gate, verifies the Kiro action still classifies as
 `CATASTROPHIC`, smoke-tests the REST API, and builds the Docker image.
 

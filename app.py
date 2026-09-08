@@ -146,14 +146,14 @@ h1,h2,h3,h4 { font-weight: 600; letter-spacing: -0.01em; }
 with st.sidebar:
     st.markdown('<div style="font-size:.68rem;color:#444;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin-bottom:.75rem;font-family:\'IBM Plex Mono\',monospace">Configuration</div>', unsafe_allow_html=True)
 
-    pipeline_choice = st.radio(
-        "Pipeline",
-        ["Direct Pipeline (No LLM)", "Claude-Augmented Pipeline"],
-        help="Direct is fully deterministic. Claude pipeline adds interpretation."
+    explain_with_claude = st.checkbox(
+        "Explain results with Claude",
+        help="The deterministic scorer always runs. Optionally layer a plain-English "
+             "briefing from Claude on top — risk scores are never delegated to the LLM."
     )
 
     anthropic_key = None
-    if pipeline_choice == "Claude-Augmented Pipeline":
+    if explain_with_claude:
         st.markdown('<div style="font-size:.68rem;color:#444;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin:.75rem 0 .4rem;font-family:\'IBM Plex Mono\',monospace">Anthropic API Key</div>', unsafe_allow_html=True)
         anthropic_key = st.text_input(
             "API Key",
@@ -216,23 +216,21 @@ if run_btn:
                 st.stop()
             actions_input = json.loads(custom_json)
 
-        with st.spinner("Running pipeline..."):
-            if pipeline_choice == "Direct Pipeline (No LLM)":
-                import pipeline_direct
-                result = pipeline_direct.run(actions_input)
-                claude_data = None
-            else:
+        with st.spinner("Scoring actions..."):
+            import pipeline_direct
+            result = pipeline_direct.run(actions_input)
+            claude_data = None
+
+            if explain_with_claude:
                 if not anthropic_key:
-                    st.error("Anthropic API key required for Claude pipeline.")
+                    st.error("Anthropic API key required to explain results with Claude.")
                     st.stop()
-                import pipeline_claude
-                full = pipeline_claude.run(actions_input, anthropic_key)
-                result = full["direct_output"]
-                claude_data = full
+                with st.spinner("Asking Claude to explain the scores..."):
+                    import claude_explainer
+                    claude_data = claude_explainer.explain(result, anthropic_key)
 
         st.session_state["result"] = result
         st.session_state["claude_data"] = claude_data
-        st.session_state["pipeline"] = pipeline_choice
 
     except json.JSONDecodeError as e:
         st.error(f"JSON parse error: {e}")

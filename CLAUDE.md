@@ -12,23 +12,24 @@ high-risk operations — without slowing down low-risk read-only actions.
 
 ## Architecture
 
-Two pipelines:
+One deterministic pipeline, plus an optional Claude explanation layer on top.
 
-### Pipeline 1: Direct Pipeline (No LLM)
+### The pipeline (pipeline_direct.py) — always runs
 - Pure Python rule-based risk scoring
 - Fully deterministic — same input always produces same output
 - Zero API calls, zero latency overhead on read-only actions
 - Action -> RiskScorer -> BlastRadius -> ApprovalGate -> AuditLogger
 
-### Pipeline 2: Claude-Augmented Pipeline
-- Runs direct pipeline first (scores are never delegated to Claude)
-- Claude INTERPRETS the risk score and explains it in plain English
+### Claude explanation layer (claude_explainer.py) — optional
+- NOT a pipeline. Takes the pipeline's output + an API key and asks Claude to
+  explain the pre-computed scores in plain English for an engineering manager
 - Claude NEVER recalculates scores — it only receives pre-computed values
 - HallucinationGuard verifies every numerical claim Claude makes
-- Model: claude-sonnet-5 (see CLAUDE_MODEL in pipeline_claude.py)
+- Model: claude-sonnet-5 (see CLAUDE_MODEL in claude_explainer.py)
+- Enabled by a checkbox in the dashboard; the REST API is deterministic-only
 
 ### Surfaces
-- app.py — Streamlit dashboard for interactive exploration
+- app.py — Streamlit dashboard for interactive exploration (+ optional Claude layer)
 - api.py — FastAPI service: POST /score (single action), POST /score/batch
   (full pipeline), GET /health. Run with `uvicorn api:app`.
 
@@ -43,8 +44,8 @@ Two pipelines:
 
 - app.py                     Streamlit dashboard (entry point)
 - api.py                     FastAPI microservice — HTTP wrapper over the direct pipeline
-- pipeline_direct.py         Pipeline 1 — deterministic, no LLM
-- pipeline_claude.py         Pipeline 2 — Claude-augmented interpretation
+- pipeline_direct.py         The pipeline — deterministic, no LLM
+- claude_explainer.py        Optional Claude explanation layer (not a pipeline)
 - modules/
   - risk_scorer.py           Core blast radius classifier (OOP, data structures)
   - approval_gate.py         Human-in-loop enforcement logic + priority queue
@@ -57,6 +58,7 @@ Two pipelines:
   - test_approval_gate.py    Gate state machine + priority queue ordering
   - test_audit_logger.py     Singleton logger, ordered dict, summary aggregation
   - test_hallucination_guard.py  Numeric claim extraction and verification
+  - test_claude_explainer.py  Explanation layer with the Anthropic client mocked
   - test_api.py              FastAPI endpoints (TestClient)
 - Dockerfile                 Container definition
 - docker-compose.yml         Local orchestration (dashboard + api)
