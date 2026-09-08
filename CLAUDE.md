@@ -32,6 +32,11 @@ One deterministic pipeline, plus an optional Claude explanation layer on top.
 - app.py — Streamlit dashboard for interactive exploration (+ optional Claude layer)
 - api.py — FastAPI service: POST /score (single action), POST /score/batch
   (full pipeline), GET /health. Run with `uvicorn api:app`.
+- examples/guarded_agent.py — reference Anthropic tool-use loop that calls the
+  gate (in-process or via AGENTGUARD_URL) before executing each tool; blocked
+  calls come back to Claude as an is_error tool_result.
+- pipeline_direct.score_one(action_dict) — the shared gate contract used by the
+  API, the example, and any embedding code: {action, classification, gate, allowed}.
 
 ## What This Project Does NOT Do
 
@@ -44,8 +49,10 @@ One deterministic pipeline, plus an optional Claude explanation layer on top.
 
 - app.py                     Streamlit dashboard (entry point)
 - api.py                     FastAPI microservice — HTTP wrapper over the direct pipeline
-- pipeline_direct.py         The pipeline — deterministic, no LLM
+- pipeline_direct.py         The pipeline — deterministic, no LLM (score_one / run)
 - claude_explainer.py        Optional Claude explanation layer (not a pipeline)
+- examples/
+  - guarded_agent.py         Anthropic tool-use loop with AgentGuard as the gate
 - modules/
   - risk_scorer.py           Core blast radius classifier (OOP, data structures)
   - approval_gate.py         Human-in-loop enforcement logic + priority queue
@@ -60,6 +67,7 @@ One deterministic pipeline, plus an optional Claude explanation layer on top.
   - test_hallucination_guard.py  Numeric claim extraction and verification
   - test_claude_explainer.py  Explanation layer with the Anthropic client mocked
   - test_api.py              FastAPI endpoints (TestClient)
+  - test_guarded_agent.py    Agent loop gates and blocks tool calls (Anthropic mocked)
 - Dockerfile                 Container definition
 - docker-compose.yml         Local orchestration (dashboard + api)
 - .github/workflows/ci.yml   GitHub Actions CI/CD

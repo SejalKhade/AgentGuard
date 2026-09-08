@@ -16,26 +16,20 @@ Endpoints:
 
 from __future__ import annotations
 
-import datetime
 from typing import Any
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 import pipeline_direct
-from modules.approval_gate import ApprovalGate
 from modules.audit_logger import AuditLogger
-from modules.risk_scorer import Action, RiskScorer
+from pipeline_direct import score_one
 
 app = FastAPI(
     title="AgentGuard",
     version="1.0.0",
     description="Pre-execution risk scorer for agentic AI actions.",
 )
-
-# RiskScorer is stateless once constructed (the prefix Trie is built in __init__),
-# so a single instance is safe to share across requests.
-_scorer = RiskScorer()
 
 
 class ActionIn(BaseModel):
@@ -61,22 +55,7 @@ def health() -> dict:
 @app.post("/score", response_model=ScoreOut)
 def score(action_in: ActionIn) -> ScoreOut:
     """Score one action and return whether it may execute autonomously."""
-    action = Action(
-        name=action_in.name,
-        target=action_in.target,
-        agent_id=action_in.agent_id,
-        parameters=action_in.parameters,
-        description=action_in.description,
-        timestamp=datetime.datetime.now().isoformat(),
-    )
-    classification = _scorer.classify(action)
-    decision = ApprovalGate(simulate_approval=True).evaluate(classification).to_dict()
-    return ScoreOut(
-        action=action.to_dict(),
-        classification=classification,
-        gate=decision,
-        allowed=decision["passed"],
-    )
+    return ScoreOut(**score_one(action_in.model_dump()))
 
 
 @app.post("/score/batch")

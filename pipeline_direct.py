@@ -17,6 +17,34 @@ from modules.risk_scorer import RiskScorer, Action
 from modules.approval_gate import ApprovalGate
 from modules.audit_logger import AuditLogger
 
+# Shared stateless scorer (the prefix Trie is built once in __init__).
+_SCORER = RiskScorer()
+
+
+def score_one(action: dict) -> dict:
+    """
+    Score a single action dict (no audit logging, no shared state).
+
+    Returns {action, classification, gate, allowed} — the same shape the REST
+    API returns and the contract an agent runtime checks before executing a tool.
+    """
+    act = Action(
+        name=action.get("name", ""),
+        target=action.get("target", ""),
+        agent_id=action.get("agent_id", "unknown"),
+        parameters=action.get("parameters", {}),
+        description=action.get("description", ""),
+        timestamp=datetime.datetime.now().isoformat(),
+    )
+    classification = _SCORER.classify(act)
+    decision = ApprovalGate(simulate_approval=True).evaluate(classification).to_dict()
+    return {
+        "action":         act.to_dict(),
+        "classification": classification,
+        "gate":           decision,
+        "allowed":        decision["passed"],
+    }
+
 
 def run(actions_input: list[dict]) -> dict:
     """

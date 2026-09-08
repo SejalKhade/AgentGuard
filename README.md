@@ -107,9 +107,10 @@ deterministic-only.
 | Surface | Entry point | Use |
 |---|---|---|
 | Dashboard | `streamlit run app.py` | Interactive exploration, full calculation trace |
-| REST API | `uvicorn api:app` | Programmatic pre-execution gate for an agent runtime |
+| REST API | `uvicorn api:app` | Pre-execution gate an agent runtime calls before a tool runs |
+| Agent loop | `examples/guarded_agent.py` | Reference Anthropic tool-use loop gated by AgentGuard |
 | CLI | `python pipeline_direct.py` | Score `data/sample_actions.json`, print JSON |
-| Library | `from modules.risk_scorer import RiskScorer` | Embed directly |
+| Library | `from pipeline_direct import score_one` | Embed the gate directly |
 
 ---
 
@@ -118,8 +119,10 @@ deterministic-only.
 ```
 app.py                        Streamlit dashboard (entry point)
 api.py                        FastAPI microservice — HTTP wrapper over the pipeline
-pipeline_direct.py            The pipeline — deterministic, no LLM
+pipeline_direct.py            The pipeline — deterministic, no LLM (score_one / run)
 claude_explainer.py           Optional Claude explanation layer (not a pipeline)
+examples/
+  guarded_agent.py            Anthropic tool-use loop gated by AgentGuard
 modules/
   risk_scorer.py              Blast-radius classifier (Action, PrefixTrie, RiskScorer)
   approval_gate.py            Human-in-loop state machine + heapq priority queue
@@ -195,19 +198,23 @@ python pipeline_direct.py        # scores data/sample_actions.json, prints the f
 ### Programmatic use
 
 ```python
-from modules.risk_scorer import RiskScorer, Action
-from modules.approval_gate import ApprovalGate
+from pipeline_direct import score_one
 
-scorer, gate = RiskScorer(), ApprovalGate()
+verdict = score_one({"name": "delete_table", "target": "prod-db",
+                     "agent_id": "agent-01", "parameters": {"table_name": "sessions"}})
 
-action = Action(name="delete_table", target="prod-db", agent_id="agent-01",
-                parameters={"table_name": "sessions"})
-
-classification = scorer.classify(action)      # -> blast_radius 2, risk_score 66.7
-decision = gate.evaluate(classification)       # -> GateStatus.PENDING, 1 approver
-if not decision.to_dict()["passed"]:
-    raise PermissionError(decision.reason)     # block execution until approved
+if not verdict["allowed"]:                     # -> Destructive, PENDING, 1 approver
+    raise PermissionError(verdict["gate"]["reason"])   # block execution until approved
 ```
+
+### In an agent loop
+
+[`examples/guarded_agent.py`](examples/guarded_agent.py) is a full Anthropic
+tool-use loop that scores every tool call through AgentGuard before executing it —
+safe calls run, destructive/catastrophic calls are refused and the denial is
+returned to Claude as an error `tool_result` so the agent adapts. Works
+in-process or over the REST API (`AGENTGUARD_URL=...`). See
+[examples/README.md](examples/README.md).
 
 ### Docker
 
@@ -230,7 +237,7 @@ docker run -p 8501:8501 agentguard
 pytest tests/ -v --cov=modules --cov-report=term-missing
 ```
 
-69 tests, ~99% module coverage. CI runs the suite on every push to `main`/`develop`
+72 tests, ~99% module coverage. CI runs the suite on every push to `main`/`develop`
 with an 80% coverage gate, verifies the Kiro action still classifies as
 `CATASTROPHIC`, smoke-tests the REST API, and builds the Docker image.
 
