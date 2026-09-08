@@ -1,0 +1,44 @@
+[
+  {
+    "name": "get_cost_explorer_data",
+    "target": "aws-cost-explorer-china",
+    "agent_id": "kiro-agent-demo",
+    "parameters": {"region": "cn-north-1", "time_range": "30d"},
+    "description": "Read cost data — equivalent to Kiro's first diagnostic step"
+  },
+  {
+    "name": "update_config",
+    "target": "staging-database",
+    "agent_id": "kiro-agent-demo",
+    "parameters": {"max_connections": 200, "timeout": 30},
+    "description": "Update staging config — reversible change"
+  },
+  {
+    "name": "delete_table",
+    "target": "prod-cost-explorer",
+    "agent_id": "kiro-agent-demo",
+    "parameters": {"table_name": "cost_explorer_cache"},
+    "description": "Delete production table — requires human approval"
+  },
+  {
+    "name": "recreate_environment",
+    "target": "prod-cost-explorer-china",
+    "agent_id": "kiro-agent-demo",
+    "parameters": {"action": "delete and recreate", "force": true, "all": true},
+    "description": "EXACT action that caused the December 2025 AWS 13-hour outage"
+  },
+  {
+    "name": "list_s3_buckets",
+    "target": "dev-environment",
+    "agent_id": "amazon-q-demo",
+    "parameters": {},
+    "description": "List buckets — pure read operation"
+  },
+  {
+    "name": "terminate_instance",
+    "target": "production-api-server",
+    "agent_id": "amazon-q-demo",
+    "parameters": {"instance_id": "i-0abc123"},
+    "description": "Terminate production instance — destructive"
+  }
+]
