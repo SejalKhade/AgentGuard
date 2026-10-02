@@ -1,5 +1,7 @@
 # AgentGuard
 
+**Live dashboard:** https://agentguard-8bgn5ibitfqtanks8irbgr.streamlit.app/
+
 **Pre-execution risk scorer for agentic AI actions.**
 
 AgentGuard is a microservice that intercepts an LLM agent's tool calls **before**
