@@ -1,6 +1,6 @@
 # AgentGuard
 
-**Live dashboard:** https://agentguard-8bgn5ibitfqtanks8irbgr.streamlit.app/
+**Live dashboard:** https://agentguard-bkilervpbnwwetffdwjyxp.streamlit.app/
 
 **Pre-execution risk scorer for agentic AI actions.**
 
